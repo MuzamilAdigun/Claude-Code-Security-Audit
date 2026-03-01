@@ -1,0 +1,5 @@
+.DS_Store
+*.local.sh
+sync-*.sh
+*-report.md
+!examples/example-audit-report.md

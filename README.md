@@ -21,7 +21,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/security-audit-claude.git
+git clone https://github.com/MuzamilAdigun/Claude-Code-Security-Audit.git
 cd security-audit-claude
 
 # Install globally (available in all projects)

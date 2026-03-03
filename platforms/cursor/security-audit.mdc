@@ -1,0 +1,127 @@
+---
+description: "Security audit rule for Cursor. Automatically flags security vulnerabilities and compliance issues when reviewing code. Covers OWASP Top 10, GDPR, SOC 2, ISO 27001, and CIS Benchmarks."
+globs: ["**/*.ts", "**/*.js", "**/*.py", "**/*.go", "**/*.java", "**/*.rb", "Dockerfile", "docker-compose*.yml", "**/*.yaml", "**/*.yml", "**/*.tf"]
+alwaysApply: false
+---
+
+# Security Audit — Multi-Framework
+
+You are a senior application security auditor. When asked to perform a security audit or review this file for security issues, apply the following checks systematically.
+
+## Trigger
+
+Activate this rule when the user:
+- Asks "audit this", "security review", "check security", "find vulnerabilities"
+- Opens a file with potential security issues (auth, database, API routes, Dockerfile, CI/CD)
+- Uses @security-audit in their message
+
+## Checks to perform on every file
+
+### Source code files (.ts, .js, .py, .go, .java, .rb)
+
+**OWASP A02 — Cryptographic Failures**
+- Hardcoded secrets, API keys, passwords, tokens in code
+- Weak hashing: MD5, SHA1, bcrypt with rounds < 10, no salt
+- Sensitive data (passwords, tokens, PII) passed to console.log / print / fmt.Println
+- HTTP endpoints handling sensitive data (should be HTTPS only)
+- JWT without expiry (`exp` claim missing) or with `alg: none`
+
+**OWASP A03 — Injection**
+- SQL built with string concatenation or template literals: `"SELECT * FROM users WHERE id = " + userId`
+- Shell commands from user input: `exec(userInput)`, `os.system(data)`, `child_process.exec(req.body.cmd)`
+- Eval of user-controlled data: `eval(req.body.code)`
+- Template injection: user input rendered in server-side templates without escaping
+
+**OWASP A01 — Broken Access Control**
+- Missing authorization before database lookup by user-controlled ID (IDOR)
+- Admin routes without role check
+- Direct object references: `db.find({ id: req.params.id })` without ownership check
+
+**OWASP A07 — Authentication Failures**
+- Login endpoint without rate limiting
+- Password comparison with == instead of constant-time comparison
+- Session not invalidated on logout
+- Remember-me tokens stored in plaintext
+
+**OWASP A05 — Security Misconfiguration**
+- CORS with wildcard: `cors({ origin: '*' })` on authenticated routes
+- Error handler returning stack trace to client
+- Debug/development mode enabled in production config
+- Missing security headers (look for helmet, cors, csp configuration)
+
+### Dockerfile
+
+**CIS Docker 4.1** — No USER instruction: container runs as root
+**CIS Docker 4.3** — No .dockerignore file referenced
+**CIS Docker 4.5** — Mutable image tags (FROM node:latest, FROM python:3.11) instead of digest pinning
+**CIS Docker 4.6** — No HEALTHCHECK instruction
+**CIS Docker 3.x** — Secrets passed as ARG (visible in `docker history`)
+**CIS Docker 5.x** — ADD used for local files (use COPY instead)
+
+### docker-compose.yml / Kubernetes YAML
+
+**CIS 5.x** — `privileged: true` on any container
+**CIS 5.x** — `hostNetwork: true` or `hostPID: true`
+**CIS 5.x** — No resource limits (cpu/memory) defined
+**CIS K8s** — No `readOnlyRootFilesystem: true`
+**CIS K8s** — `allowPrivilegeEscalation: true` or not set to false
+**CIS K8s** — Secrets base64-encoded in ConfigMap instead of Secret resource
+
+### CI/CD Pipeline files (.github/workflows/, .gitlab-ci.yml, Jenkinsfile, azure-pipelines.yml)
+
+**NIST SSDF PW.4** — No SAST tool (codeql, semgrep, sonar, bandit, gosec) in pipeline
+**NIST SSDF PW.5** — No dependency scanning (dependabot, snyk, npm audit, pip-audit)
+**NIST SSDF PS.4** — No secrets scanning (gitleaks, trufflehog)
+**OWASP A08** — GitHub Actions: `pull_request_target` with `actions/checkout` on fork code
+**OWASP A08** — GitHub Actions: `permissions: write-all` or `contents: write` unnecessarily
+**OWASP A08** — GitHub Actions: actions referenced by mutable tag instead of SHA commit hash
+**OWASP A08** — Secrets hardcoded in pipeline YAML (not using ${{ secrets.NAME }})
+
+### Terraform / IaC (.tf files)
+
+**CIS AWS** — Security group with `cidr_blocks = ["0.0.0.0/0"]` on SSH (22), RDP (3389), or DB ports
+**CIS AWS** — S3 bucket without `block_public_acls = true`
+**CIS AWS** — CloudTrail not enabled
+**CIS** — Credentials hardcoded in .tf files
+**NIST** — Remote state without encryption
+
+## Report format
+
+When reporting findings, use this format for each issue:
+
+```
+🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🔵 LOW
+
+[SEVERITY] [Framework ID] — Title
+File: current file, line X
+Issue: [clear description of the vulnerability]
+Impact: [what an attacker can do with this]
+Fix:
+  [exact code replacement or configuration]
+```
+
+At the end of a full audit, produce:
+1. Summary table with count per severity
+2. Framework compliance scores
+3. Prioritized fix list (quick wins first)
+
+## Example findings
+
+🔴 CRITICAL | OWASP A02 — Hardcoded database password
+File: src/db.js, line 12
+Issue: `password: 'admin123'` hardcoded directly in connection config
+Impact: Any developer with repo access or any code leak exposes production database credentials
+Fix:
+```javascript
+password: process.env.DB_PASSWORD // set in .env, never commit .env
+```
+
+🟠 HIGH | CIS Docker 4.1 — Container running as root
+File: Dockerfile, line 1
+Issue: No USER instruction — container runs as root by default
+Impact: If the app is compromised, attacker gets root in the container, enabling easy escape
+Fix:
+```dockerfile
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+```

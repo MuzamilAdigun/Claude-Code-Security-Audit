@@ -1,127 +1,544 @@
 ---
-description: "Security audit rule for Cursor. Automatically flags security vulnerabilities and compliance issues when reviewing code. Covers OWASP Top 10, GDPR, SOC 2, ISO 27001, and CIS Benchmarks."
-globs: ["**/*.ts", "**/*.js", "**/*.py", "**/*.go", "**/*.java", "**/*.rb", "Dockerfile", "docker-compose*.yml", "**/*.yaml", "**/*.yml", "**/*.tf"]
+description: "Comprehensive security audit for Cursor — covers OWASP Top 10, SOC 2, GDPR, ISO 27001, PCI-DSS, NIST SP 800-53, NIST SSDF, CIS Benchmarks, HIPAA. Automatically flags security vulnerabilities across all major compliance frameworks."
+globs: ["**/*.ts", "**/*.js", "**/*.tsx", "**/*.jsx", "**/*.py", "**/*.go", "**/*.java", "**/*.rb", "**/*.php", "**/*.rs", "Dockerfile", "docker-compose*.yml", "**/*.yaml", "**/*.yml", "**/*.tf", "**/*.tfvars", "Jenkinsfile", "**/*.hcl"]
 alwaysApply: false
 ---
 
-# Security Audit — Multi-Framework
+# Security Audit — Multi-Framework (9 Frameworks)
 
-You are a senior application security auditor. When asked to perform a security audit or review this file for security issues, apply the following checks systematically.
+You are a senior application security auditor. When asked to perform a security audit or review this file for security issues, apply all checks below systematically, then produce a structured report.
 
-## Trigger
+## Trigger conditions
 
-Activate this rule when the user:
-- Asks "audit this", "security review", "check security", "find vulnerabilities"
-- Opens a file with potential security issues (auth, database, API routes, Dockerfile, CI/CD)
+Activate when the user:
+- Asks "audit this", "security review", "check security", "find vulnerabilities", "/security-audit"
+- Opens a file with potential security issues (auth, database, API routes, Dockerfile, CI/CD, IaC)
 - Uses @security-audit in their message
 
-## Checks to perform on every file
+---
 
-### Source code files (.ts, .js, .py, .go, .java, .rb)
+## Framework 1 — OWASP Top 10
 
-**OWASP A02 — Cryptographic Failures**
-- Hardcoded secrets, API keys, passwords, tokens in code
-- Weak hashing: MD5, SHA1, bcrypt with rounds < 10, no salt
-- Sensitive data (passwords, tokens, PII) passed to console.log / print / fmt.Println
-- HTTP endpoints handling sensitive data (should be HTTPS only)
-- JWT without expiry (`exp` claim missing) or with `alg: none`
+### A01 — Broken Access Control
+- IDOR: `db.find({ id: req.params.id })` without verifying the requesting user owns that resource
+- Missing auth middleware on routes that mutate data or return sensitive resources
+- Path traversal: `fs.readFile('../' + req.params.file)` or `open('/data/' + user_input)`
+- Privilege escalation: role not checked before granting admin functionality
+- Missing `Authorization` header check on `/admin/*`, `/api/v1/internal/*` routes
+- CORS policy allowing cross-origin reads from unauthenticated origins on credentialed endpoints
 
-**OWASP A03 — Injection**
-- SQL built with string concatenation or template literals: `"SELECT * FROM users WHERE id = " + userId`
-- Shell commands from user input: `exec(userInput)`, `os.system(data)`, `child_process.exec(req.body.cmd)`
-- Eval of user-controlled data: `eval(req.body.code)`
-- Template injection: user input rendered in server-side templates without escaping
+### A02 — Cryptographic Failures
+- Hardcoded secrets: `password: 'admin123'`, `apiKey: "sk-..."`, `token = "eyJ..."` in source code
+- Weak hashing: `md5(password)`, `sha1(password)`, bcrypt with `rounds < 10`
+- No salt: `hashlib.sha256(password.encode())` without salt
+- Sensitive data in logs: `console.log('User:', user)` where user includes passwords/tokens/PII
+- HTTP used for endpoints transmitting credentials or tokens (should enforce HTTPS/HSTS)
+- JWT with `alg: none` accepted, missing `exp` claim, or secret stored in code
+- Symmetric AES keys or private keys committed to repository
+- TLS 1.0/1.1 still accepted in server configuration
 
-**OWASP A01 — Broken Access Control**
-- Missing authorization before database lookup by user-controlled ID (IDOR)
-- Admin routes without role check
-- Direct object references: `db.find({ id: req.params.id })` without ownership check
+### A03 — Injection
+- SQL concatenation: `"SELECT * FROM users WHERE email = '" + email + "'"` (use parameterized queries)
+- Shell injection: `exec('ls ' + userInput)`, `os.system(req.body.cmd)`, `child_process.exec(data)`
+- Server-side template injection: user data inserted into template strings without escaping
+- eval() with user-controlled input: `eval(req.body.code)`, `Function(userInput)()`
+- LDAP injection: filter built from unsanitized user input
+- XML/XXE: XML parsers with external entities enabled processing user-supplied XML
+- NoSQL injection: `db.find({ $where: userInput })` or unsanitized MongoDB operators
 
-**OWASP A07 — Authentication Failures**
-- Login endpoint without rate limiting
-- Password comparison with == instead of constant-time comparison
-- Session not invalidated on logout
-- Remember-me tokens stored in plaintext
+### A04 — Insecure Design
+- No rate limiting on login, password reset, or registration endpoints
+- No input length or type validation at API boundaries
+- Missing CAPTCHA or anti-automation on public-facing forms
+- Sensitive business logic reachable without multi-step verification
+- Lack of account lockout after repeated failed attempts
 
-**OWASP A05 — Security Misconfiguration**
-- CORS with wildcard: `cors({ origin: '*' })` on authenticated routes
-- Error handler returning stack trace to client
-- Debug/development mode enabled in production config
-- Missing security headers (look for helmet, cors, csp configuration)
+### A05 — Security Misconfiguration
+- CORS wildcard on authenticated routes: `cors({ origin: '*' })`
+- Verbose error responses returning stack traces: `res.json({ error: err.stack })`
+- Debug mode in production: `DEBUG=true`, `app.run(debug=True)`, `NODE_ENV=development`
+- Missing security headers: no helmet, no CSP, no X-Frame-Options, no HSTS
+- Default credentials not changed (admin/admin, root/root)
+- Unnecessary HTTP methods enabled (TRACE, DELETE on public endpoints)
+- Directory listing enabled on web server
 
-### Dockerfile
+### A06 — Vulnerable and Outdated Components
+- `package.json` / `requirements.txt` / `go.mod` with known-CVE versions
+- Dependencies pinned to overly broad ranges: `"express": "^3.x"`, `"django>=2.0"`
+- No automated dependency update tool (Dependabot, Renovate, pip-audit)
+- Outdated base images in Dockerfile without regular rebuild
+- EOL runtime versions (Node.js 14, Python 3.7, Java 8 without LTS support)
 
-**CIS Docker 4.1** — No USER instruction: container runs as root
-**CIS Docker 4.3** — No .dockerignore file referenced
-**CIS Docker 4.5** — Mutable image tags (FROM node:latest, FROM python:3.11) instead of digest pinning
-**CIS Docker 4.6** — No HEALTHCHECK instruction
-**CIS Docker 3.x** — Secrets passed as ARG (visible in `docker history`)
-**CIS Docker 5.x** — ADD used for local files (use COPY instead)
+### A07 — Identification and Authentication Failures
+- Weak password hashing: MD5, SHA1, or unsalted SHA256 for password storage
+- Missing MFA for administrative accounts
+- JWT tokens without expiry (`exp` missing) or overly long-lived refresh tokens
+- Session token not invalidated on logout (server-side session not destroyed)
+- Brute-force not mitigated on login endpoint
+- Remember-me tokens stored in plaintext in database
+- Password reset tokens with long expiry or reusable tokens
 
-### docker-compose.yml / Kubernetes YAML
+### A08 — Software and Data Integrity Failures
+- CI/CD pipeline without SAST or SCA step
+- GitHub Actions: `pull_request_target` with `actions/checkout` of fork code (code injection risk)
+- GitHub Actions: actions referenced by mutable tag (`uses: actions/checkout@v3`) instead of SHA
+- `permissions: write-all` or broad `contents: write` on untrusted workflows
+- No artifact signing or provenance attestation
+- Unsigned container images pushed to registry
+- Auto-update mechanisms that download and execute without integrity check
 
-**CIS 5.x** — `privileged: true` on any container
-**CIS 5.x** — `hostNetwork: true` or `hostPID: true`
-**CIS 5.x** — No resource limits (cpu/memory) defined
-**CIS K8s** — No `readOnlyRootFilesystem: true`
-**CIS K8s** — `allowPrivilegeEscalation: true` or not set to false
-**CIS K8s** — Secrets base64-encoded in ConfigMap instead of Secret resource
+### A09 — Security Logging and Monitoring Failures
+- No access logging on sensitive endpoints (auth, payment, admin)
+- No centralized log aggregation or SIEM integration visible in code
+- Failed authentication events not logged
+- Log rotation not configured, logs written to ephemeral container storage only
+- Sensitive data included in logs: `logger.info('Login', { password: req.body.password })`
 
-### CI/CD Pipeline files (.github/workflows/, .gitlab-ci.yml, Jenkinsfile, azure-pipelines.yml)
+### A10 — Server-Side Request Forgery (SSRF)
+- User-controlled URL fetched server-side without validation: `fetch(req.body.url)`, `requests.get(user_url)`
+- No allowlist for outbound HTTP requests in code or infrastructure
+- Internal metadata endpoints reachable: AWS `169.254.169.254`, GCP `metadata.google.internal`
+- Redirect following enabled on server-side HTTP clients with user-supplied URLs
 
-**NIST SSDF PW.4** — No SAST tool (codeql, semgrep, sonar, bandit, gosec) in pipeline
-**NIST SSDF PW.5** — No dependency scanning (dependabot, snyk, npm audit, pip-audit)
-**NIST SSDF PS.4** — No secrets scanning (gitleaks, trufflehog)
-**OWASP A08** — GitHub Actions: `pull_request_target` with `actions/checkout` on fork code
-**OWASP A08** — GitHub Actions: `permissions: write-all` or `contents: write` unnecessarily
-**OWASP A08** — GitHub Actions: actions referenced by mutable tag instead of SHA commit hash
-**OWASP A08** — Secrets hardcoded in pipeline YAML (not using ${{ secrets.NAME }})
+---
 
-### Terraform / IaC (.tf files)
+## Framework 2 — SOC 2
 
-**CIS AWS** — Security group with `cidr_blocks = ["0.0.0.0/0"]` on SSH (22), RDP (3389), or DB ports
-**CIS AWS** — S3 bucket without `block_public_acls = true`
-**CIS AWS** — CloudTrail not enabled
-**CIS** — Credentials hardcoded in .tf files
-**NIST** — Remote state without encryption
+### CC6 — Logical and Physical Access Controls
+**CC6.1 — Access Management**
+- Missing MFA enforcement for privileged user accounts
+- Shared credentials or generic service accounts used across multiple services
+- Sensitive data (PII, credentials, keys) not encrypted at rest
+- Role-based access control not implemented; all users have equal permissions
 
-## Report format
+**CC6.2 — Authentication and Transmission Security**
+- TLS not enforced for all data in transit
+- Deprecated TLS versions (1.0, 1.1) or cipher suites (RC4, DES, 3DES) still accepted
+- Certificate pinning absent on mobile/client applications handling sensitive data
 
-When reporting findings, use this format for each issue:
+### CC7 — System Operations
+**CC7.1 — Monitoring and Detection**
+- No health check endpoints defined
+- No alerting configured for abnormal authentication events or error rate spikes
+- Application metrics not exposed (no `/metrics`, no Prometheus annotations)
+
+**CC7.2 — Incident Response**
+- Centralized logging not implemented; logs scattered across services
+- No correlation ID in log entries to trace requests across services
+- No runbook or incident response procedure referenced in code/docs
+
+### CC8 — Change Management
+**CC8.1 — Change Control**
+- No CI/CD pipeline enforcing tests before merge
+- Branch protection rules not evident from pipeline config
+- No code review requirement visible from CODEOWNERS or branch rules
+
+### A1 — Availability
+- No backup mechanism visible for persistent data stores
+- No health check or readiness probe defined in Kubernetes/Docker configuration
+- No graceful shutdown handler in application code
+- Single point of failure: no redundancy or fallback configured
+
+---
+
+## Framework 3 — GDPR
+
+### Data Protection Checks
+- Personal data in logs: email addresses, IP addresses, full names, phone numbers, national IDs
+  Pattern: `logger.*(email|ip|address|phone|ssn|passport)` in log statements
+- Analytics loaded without consent gate: Google Analytics, Mixpanel, Segment, Hotjar, Facebook Pixel
+  loaded unconditionally at page load without checking consent cookie/flag
+- No privacy policy link in frontend application (check `<footer>`, `<nav>`, registration forms)
+- User data transmitted to third-party APIs without explicit disclosure in privacy policy
+- No data deletion mechanism: no endpoint or admin function to purge user data on request
+- No data export mechanism: no DSAR (Data Subject Access Request) handler
+- Cookies set without `SameSite`, `Secure`, or `HttpOnly` attributes
+- Retention policy not implemented: data accumulated without expiry or archival logic
+- PII stored in URL query parameters: `/search?email=user@example.com` (logged by servers/proxies)
+- Consent not re-requested when purpose changes; initial consent stored without version/timestamp
+
+---
+
+## Framework 4 — ISO 27001 (Annex A)
+
+### A.8.9 — Configuration Management
+- Secrets in source code or committed configuration files
+- Hardcoded credentials: `DB_PASS = 'prod_password'`, `SECRET_KEY = "abc123"`
+- Infrastructure configuration not managed as code (manual changes undocumented)
+
+### A.8.25 — Secure Development Lifecycle
+- No security requirements defined in issue/ticket templates
+- CI/CD pipeline does not include security gates (SAST, DAST, SCA)
+- No security-focused code review checklist visible in repository
+
+### A.8.24 — Use of Cryptography
+- Deprecated algorithms in use: DES, 3DES, RC2, RC4, MD5, SHA1 for security purposes
+- RSA keys shorter than 2048 bits; EC keys shorter than 256 bits
+- Cryptographic keys hardcoded rather than managed via KMS or secrets manager
+
+### A.8.28 — Secure Coding
+- Unparameterized database queries (SQL injection risk)
+- Missing input validation and output encoding
+- Server-side request forgery through unvalidated redirects or fetches
+
+### A.8.12 — Information Leakage Prevention
+- No secrets scanning configured in CI/CD pipeline (gitleaks, trufflehog)
+- `.env` files not in `.gitignore`
+- Private keys, certificates, or cloud credentials in repository history
+- Verbose API error messages exposing internal system paths or technology stack
+
+### A.5.36 — Compliance with Policies
+- SECURITY.md absent from repository root
+- No vulnerability disclosure policy
+- No defined process for handling security reports
+
+---
+
+## Framework 5 — PCI-DSS
+
+Apply these checks when code handles payment data, references card processing, or integrates with payment APIs.
+
+### Cardholder Data Environment (CDE) Checks
+- PAN (Primary Account Number) patterns in source code, logs, or comments:
+  Pattern: `\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b`
+- CVV/CVC/CVV2 stored anywhere (Requirement 3.2.1 — strictly prohibited post-authorization)
+  Pattern: `cvv`, `cvc`, `security_code` persisted to database or file
+- Payment card data transmitted without TLS encryption
+- Full PAN logged (even partially masked logging must be reviewed)
+- Direct card processing without using an approved payment gateway or tokenization
+
+### Requirement 6 — Secure Systems
+- No web application firewall (WAF) referenced in infrastructure config
+- Direct internet access to payment-processing servers (missing DMZ/segmentation)
+- Patch management not automated for systems in CDE
+
+### Requirement 7/8 — Access Control
+- No role-based access to cardholder data; all application roles can read payment tables
+- Generic shared accounts used for accessing payment systems
+- No MFA on all non-console administrative access to CDE
+
+### Requirement 10 — Audit Logging
+- Access to cardholder data not logged with timestamp, user, and action
+- Logs not protected from modification (no WORM storage or log forwarding)
+
+### Requirement 11 — Security Testing
+- No penetration testing or vulnerability scanning evidence in pipeline
+- No file integrity monitoring on critical system files
+
+---
+
+## Framework 6 — NIST SP 800-53
+
+### IA-5 — Authenticator Management
+- Passwords stored without strong hashing (bcrypt, argon2, scrypt)
+- Default credentials not changed in application or infrastructure configuration
+- API keys without rotation mechanism or expiry
+
+### AU-2 / AU-12 — Audit Events / Audit Record Generation
+- Authentication events (success and failure) not logged
+- Privileged actions not logged (admin operations, configuration changes)
+- Log entries missing required fields: timestamp, user identity, event type, outcome
+
+### SC-8 — Transmission Confidentiality and Integrity
+- Data transmitted over unencrypted channels
+- TLS certificate validation disabled: `verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify: true`
+- Sensitive data in GET request URL parameters (logged by intermediaries)
+
+### SC-28 — Protection of Information at Rest
+- Database fields containing PII or secrets not encrypted
+- Encryption at rest not enabled on storage volumes or database instances (check Terraform)
+- Encryption keys stored alongside the data they protect
+
+### SA-11 — Developer Security Testing
+- No SAST tool configured in development pipeline
+- No DAST tool referenced for pre-production security testing
+- Security findings not tracked in issue tracker or project management tool
+
+### CM-6 — Configuration Settings
+- Insecure default configuration not hardened before deployment
+- Configuration drift not detected (no baseline comparison in pipeline)
+- Infrastructure configuration not reviewed for CIS Benchmark alignment
+
+### SI-10 — Information Input Validation
+- User inputs accepted without type, length, format, or range validation
+- File upload endpoints without MIME type validation and size limits
+- GraphQL queries without depth limiting or complexity analysis
+
+---
+
+## Framework 7 — NIST SSDF (SP 800-218)
+
+### PO.1 — Security Requirements
+- No SECURITY.md in repository root
+- No threat model document referenced in project documentation
+- Security requirements absent from feature ticket templates or ADRs
+
+### PS.3 — Protect Software
+- Container images not scanned for CVEs before push (Trivy, Grype, Snyk Container)
+- No SBOM (Software Bill of Materials) generated in CI/CD pipeline
+- Build artifacts not signed or attested (Sigstore/Cosign, SLSA provenance)
+- Base image digest not pinned in Dockerfile (use `FROM node:20-alpine@sha256:...`)
+
+### PW.4 — Review the Code
+- No SAST tool configured: CodeQL, Semgrep, Bandit (Python), Gosec (Go), SpotBugs (Java)
+- SAST not blocking merges on HIGH/CRITICAL findings
+- No manual security code review requirement for sensitive changes (auth, crypto, payment)
+
+### PW.5 — Test Executable Code
+- No SCA (Software Composition Analysis) in pipeline: Dependabot, Snyk, OWASP Dependency-Check
+- Dependency vulnerabilities not blocking merges
+- No license compliance check on third-party dependencies
+
+### PW.7 — Remediate Vulnerabilities
+- Security findings older than SLA thresholds still open with no mitigation plan
+- No CVE triage process visible (no security label in issue tracker)
+
+### RV.1 — Identify and Confirm Vulnerabilities
+- No vulnerability disclosure policy (SECURITY.md missing)
+- No bug bounty program or responsible disclosure contact
+- CVEs in dependencies not tracked after initial scan
+
+---
+
+## Framework 8 — CIS Benchmarks
+
+### CIS Docker Benchmarks
+
+**CIS 4.1 — Create a user for the container**
+- Dockerfile lacks `USER` instruction — container runs as root by default
+- Fix: `RUN addgroup -S app && adduser -S app -G app` then `USER app`
+
+**CIS 4.3 — Do not install unnecessary packages**
+- `apt-get install` without `--no-install-recommends`
+- Development tools (gcc, make, curl, wget) installed in production image stage
+
+**CIS 4.5 — Use only verified base images with specific digest**
+- `FROM node:latest`, `FROM python:3`, `FROM ubuntu:latest` — mutable tags
+- Fix: Pin to digest `FROM node:20-alpine@sha256:<digest>`
+
+**CIS 4.6 — Add HEALTHCHECK to the container image**
+- No `HEALTHCHECK` instruction in Dockerfile
+- Fix: `HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:8080/health || exit 1`
+
+**CIS 4.3 — Ensure .dockerignore is used**
+- `.dockerignore` absent or missing `.git`, `node_modules`, `.env`, `*.key`, `*.pem`
+
+**CIS 3.x — Do not use ADD for remote URLs or local files**
+- `ADD ./src /app` — use `COPY` instead; `ADD` has unpack behavior and network fetch capability
+
+**CIS 4.x — Secrets not passed via ENV or ARG**
+- `ARG DB_PASSWORD` or `ENV SECRET_KEY=...` baking secrets into image layers
+
+### CIS Kubernetes Benchmarks
+
+**Pod Security**
+- `securityContext.privileged: true` on any container — grants full host kernel access
+- `allowPrivilegeEscalation` not set to `false` — enables setuid binary abuse
+- `securityContext.runAsNonRoot: true` absent — container may run as UID 0
+- `readOnlyRootFilesystem: true` absent — container can write to filesystem
+
+**Resource Management**
+- Missing `resources.limits.cpu` and `resources.limits.memory` — enables resource exhaustion
+- Missing `resources.requests` — prevents proper scheduling
+
+**Network Security**
+- No `NetworkPolicy` resources in namespace — all pods can communicate freely
+- Service exposed as `LoadBalancer` or `NodePort` without necessity
+
+**Secrets Management**
+- Secrets base64-encoded in `ConfigMap` instead of `Secret` resource
+- `Secret` objects mounted as environment variables (prefer volume mounts)
+- No external secrets operator (Vault, AWS Secrets Manager, Azure Key Vault) integration
+
+**RBAC**
+- `ClusterRoleBinding` to `cluster-admin` for application service accounts
+- Wildcard permissions: `verbs: ["*"]` or `resources: ["*"]`
+- `automountServiceAccountToken: true` on pods that do not need API access
+
+### CIS GitHub Actions / CI-CD Benchmarks
+
+**Workflow Injection**
+- `pull_request_target` with `actions/checkout` of the PR branch code (arbitrary code execution)
+- Untrusted input in `run:` step: `run: echo "${{ github.event.pull_request.title }}"` (injection via PR title)
+
+**Permissions**
+- `permissions: write-all` at workflow or job level
+- `GITHUB_TOKEN` granted `contents: write` without justification
+- No least-privilege `permissions` block defined
+
+**Action Pinning**
+- Actions referenced by mutable tag: `uses: actions/checkout@v4` — should be `uses: actions/checkout@<SHA>`
+- Third-party actions not reviewed for supply chain risk
+
+**Secrets Hygiene**
+- Secrets hardcoded in workflow YAML instead of `${{ secrets.NAME }}`
+- Secrets printed in `run:` step output (set `add-mask` if dynamic)
+
+### CIS Terraform / IaC Benchmarks
+
+**AWS**
+- Security group with `cidr_blocks = ["0.0.0.0/0"]` on port 22 (SSH), 3389 (RDP), 5432 (Postgres), 27017 (MongoDB)
+- S3 bucket without `block_public_acls = true` and `block_public_policy = true`
+- CloudTrail not enabled or log file validation disabled
+- IAM policy with `"Action": "*"` or `"Resource": "*"` (overly permissive)
+- RDS without `storage_encrypted = true` and `deletion_protection = true`
+
+**General IaC**
+- Credentials hardcoded in `.tf` or `.tfvars` files
+- Remote state without encryption or without state locking
+- Resources without mandatory tags (environment, owner, cost-center)
+- Terraform plan not reviewed or not stored as artifact before apply
+
+---
+
+## Framework 9 — HIPAA
+
+Apply these checks when code references health data, patient records, medical terminology, or integrates with EHR systems.
+
+### ePHI Detection Patterns
+- Patient identifiers in logs or API responses: `patient_id`, `mrn`, `ssn`, `dob`, `diagnosis`, `medication`, `icd_code`
+- PHI in URL paths: `/patient/123456/records` (IDs in URLs are logged by load balancers)
+- Diagnosis or medication data returned without access control verification
+- PHI in error messages or debug output
+
+### Technical Safeguards (§164.312)
+- PHI transmitted without TLS (HTTP endpoints handling health data)
+- PHI not encrypted at rest in database (check column-level encryption or full-disk encryption config)
+- Encryption key management absent or keys co-located with encrypted data
+- Auto-logoff not implemented for sessions accessing PHI
+- Emergency access procedure (break-glass) not audited or logged
+
+### Audit Controls (§164.312(b))
+- No audit trail for PHI access (read, write, delete operations not logged with user and timestamp)
+- Audit logs not tamper-proof or not stored separately from application logs
+- Failed access attempts to PHI not logged
+- Log retention not set to minimum 6 years
+
+### Access Controls (§164.312(a)(1))
+- PHI endpoints accessible without authentication
+- Role-based access to PHI not enforced (any authenticated user can access any patient record)
+- No minimum necessary access principle applied (overly broad PHI queries)
+
+### Transmission Security (§164.312(e)(1))
+- PHI sent to third-party services without Business Associate Agreement (BAA) verification
+- PHI in email bodies or SMS messages without end-to-end encryption
+- API responses including PHI without field-level filtering based on user role
+
+---
+
+## Finding Report Format
+
+Use this format for every finding:
 
 ```
-🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🔵 LOW
+🔴 CRITICAL | 🟠 HIGH | 🟡 MEDIUM | 🔵 LOW | ⚪ INFO
 
 [SEVERITY] [Framework ID] — Title
-File: current file, line X
+File: [filename], line [X]
 Issue: [clear description of the vulnerability]
-Impact: [what an attacker can do with this]
+Impact: [specific attack scenario or compliance violation]
 Fix:
-  [exact code replacement or configuration]
+  [exact corrected code or configuration]
+References: [CVE / CWE / control ID]
 ```
 
-At the end of a full audit, produce:
-1. Summary table with count per severity
-2. Framework compliance scores
-3. Prioritized fix list (quick wins first)
+**Severity definitions:**
+- CRITICAL: Directly exploitable, data breach likely, regulatory fine probable
+- HIGH: Exploitable with moderate effort or significant compliance gap
+- MEDIUM: Exploitable under specific conditions or policy violation
+- LOW: Defense-in-depth improvement, minor policy gap
+- INFO: Best practice recommendation, no direct security impact
 
-## Example findings
+---
 
-🔴 CRITICAL | OWASP A02 — Hardcoded database password
-File: src/db.js, line 12
-Issue: `password: 'admin123'` hardcoded directly in connection config
-Impact: Any developer with repo access or any code leak exposes production database credentials
+## Audit Command Behavior
+
+When the user types `/security-audit` or "audit this file/project" or "find security issues":
+
+1. **Scan phase**: Check all workspace files matching the configured globs against all framework controls above
+2. **Triage phase**: Deduplicate and assign severity per finding
+3. **Report structure**:
+   - Executive summary (total findings by severity)
+   - Findings grouped by severity (CRITICAL first), then by framework
+   - Each finding in the standard format above
+4. **Compliance dashboard** (score /10 per framework based on controls passing):
+   ```
+   Framework       Score    Status
+   OWASP Top 10    X/10     [PASS/REVIEW/FAIL]
+   SOC 2           X/10     [PASS/REVIEW/FAIL]
+   GDPR            X/10     [PASS/REVIEW/FAIL]
+   ISO 27001       X/10     [PASS/REVIEW/FAIL]
+   PCI-DSS         X/10     [N/A if no payment data]
+   NIST 800-53     X/10     [PASS/REVIEW/FAIL]
+   NIST SSDF       X/10     [PASS/REVIEW/FAIL]
+   CIS Benchmarks  X/10     [PASS/REVIEW/FAIL]
+   HIPAA           X/10     [N/A if no health data]
+   ```
+5. **Quick wins**: List all CRITICAL and HIGH findings with estimated fix time under 30 minutes
+6. **Remediation roadmap**: Group remaining findings by sprint effort (1 day / 1 week / 1 sprint)
+
+---
+
+## Example Findings
+
+**🔴 CRITICAL | OWASP A02 — Hardcoded database password**
+File: `src/db.ts`, line 14
+Issue: `password: 'prod_db_pass_2024'` hardcoded directly in connection configuration
+Impact: Any developer with repository access or any code leak exposes production database credentials
 Fix:
-```javascript
-password: process.env.DB_PASSWORD // set in .env, never commit .env
+```typescript
+password: process.env.DB_PASSWORD // load from environment; never commit .env to git
 ```
+References: CWE-798, ISO 27001 A.8.9
 
-🟠 HIGH | CIS Docker 4.1 — Container running as root
-File: Dockerfile, line 1
-Issue: No USER instruction — container runs as root by default
-Impact: If the app is compromised, attacker gets root in the container, enabling easy escape
+---
+
+**🔴 CRITICAL | OWASP A03 — SQL Injection**
+File: `src/users/repository.ts`, line 42
+Issue: `db.query("SELECT * FROM users WHERE id = " + req.params.id)` — user input concatenated directly
+Impact: Attacker passes `1 OR 1=1--` to dump entire users table; `1; DROP TABLE users--` to destroy data
+Fix:
+```typescript
+db.query("SELECT * FROM users WHERE id = $1", [req.params.id])
+```
+References: CWE-89, OWASP A03:2021
+
+---
+
+**🟠 HIGH | CIS Docker 4.1 — Container running as root**
+File: `Dockerfile`, line 1
+Issue: No `USER` instruction — container runs as root (UID 0) by default
+Impact: If application is compromised, attacker has root inside container, easing container escape
 Fix:
 ```dockerfile
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 ```
+References: CIS Docker 4.1, NIST SSDF PS.3
+
+---
+
+**🟠 HIGH | GDPR — PII in application logs**
+File: `src/auth/login.ts`, line 78
+Issue: `logger.info('Login attempt', { email: req.body.email, ip: req.ip })` logs personal data without purpose limitation
+Impact: GDPR Art. 5(1)(b) violation; email and IP are personal data and must not be logged without lawful basis and retention policy
+Fix:
+```typescript
+logger.info('Login attempt', { userId: user.id, ip: hashIP(req.ip) }) // hash or pseudonymize PII
+```
+References: GDPR Art. 5, Art. 32
+
+---
+
+**🟡 MEDIUM | NIST SSDF PW.4 — No SAST in CI/CD pipeline**
+File: `.github/workflows/ci.yml`
+Issue: Pipeline has no SAST step — vulnerabilities introduced in code are never automatically detected
+Impact: Security regressions shipped to production undetected; fails NIST SSDF PW.4 and ISO 27001 A.8.25
+Fix:
+```yaml
+- name: Run SAST (CodeQL)
+  uses: github/codeql-action/analyze@<SHA>
+  with:
+    languages: typescript, javascript
+```
+References: NIST SSDF PW.4, ISO 27001 A.8.25, OWASP A08

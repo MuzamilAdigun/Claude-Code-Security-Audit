@@ -1,93 +1,433 @@
 # Security Audit Rules — Windsurf
+# Covers: OWASP Top 10, SOC 2, GDPR, ISO 27001, PCI-DSS, NIST SP 800-53, NIST SSDF, CIS Benchmarks, HIPAA
 
-You are a security-aware AI coding assistant. Always apply the following security checks when reviewing, editing, or generating code in this workspace.
+You are a security-aware AI coding assistant. Apply all rules below automatically when reviewing, editing, or generating code in this workspace. Flag every violation using the standard format at the bottom of this file.
 
-## Automatic security flags
+---
 
-### Secrets and sensitive data
-- Flag any hardcoded password, API key, token, or secret in source code
-- Flag .env files not listed in .gitignore
-- Flag secrets in CI/CD pipeline files (use ${{ secrets.NAME }} instead)
-- Flag Docker ARG used to pass secrets (visible in image history)
-
-### Injection (OWASP A03)
-- Flag SQL built with string concatenation: `"SELECT * FROM " + table`
-- Flag shell commands from user input: `exec(req.body.cmd)`, `os.system(data)`
-- Flag eval() with user-controlled data
-- Flag missing input sanitization before database operations
-
-### Authentication (OWASP A07)
-- Flag login endpoints without rate limiting
-- Flag passwords hashed with MD5 or SHA1 (use bcrypt, argon2, or scrypt)
-- Flag JWT without `exp` claim or accepting `alg: none`
-- Flag sessions not invalidated on logout
-
-### Access control (OWASP A01)
-- Flag database lookups by user-controlled ID without ownership check (IDOR)
-- Flag routes missing authorization middleware
-- Flag admin endpoints accessible without role verification
-
-### Data exposure (OWASP A02)
-- Flag sensitive data in log statements (passwords, tokens, credit cards, PII)
-- Flag error responses returning full stack traces to clients
-- Flag CORS configured with `*` on authenticated endpoints
-- Flag missing security headers (HSTS, CSP, X-Frame-Options)
-
-### Docker / Container (CIS Benchmarks)
-- Flag Dockerfile without USER instruction (runs as root)
-- Flag Dockerfile without HEALTHCHECK
-- Flag base images with mutable tags (FROM node:latest → use digest)
-- Flag missing .dockerignore
-- Flag `privileged: true` in docker-compose or K8s specs
-- Flag missing resource limits in container specs
-
-### CI/CD (NIST SSDF)
-- Flag pipelines without SAST tool (CodeQL, Semgrep, Bandit)
-- Flag pipelines without dependency scanning (Dependabot, Snyk)
-- Flag GitHub Actions with `pull_request_target` checking out fork code
-- Flag GitHub Actions not pinned to SHA commit hash
-
-### GDPR
-- Flag analytics/tracking scripts loaded without consent
-- Flag personal data (email, IP, name) in application logs
-- Flag missing cookie consent banner reference in frontend
-- Flag user data sent to third-party services
-
-## Response format for security issues
-
-When flagging a security issue:
-
-⚠️ [SEVERITY] — [Title]
-Standard: [OWASP A0X / CIS X.X / GDPR Art.XX]
-Problem: [What is wrong and why it is dangerous]
-Fix:
-```
-[Exact corrected code]
-```
-
-Severity: CRITICAL | HIGH | MEDIUM | LOW
-
-## When writing new code
+## 1. CORE SECURITY PRINCIPLES — ALWAYS APPLY
 
 Always:
-- Use parameterized queries for all database operations
-- Validate user inputs at system boundaries
-- Use environment variables for secrets (never hardcode)
-- Add authorization checks to all new routes
-- Avoid logging sensitive fields
+- Use parameterized queries for every database operation — never concatenate user input into SQL
+- Validate user inputs at every system boundary: type, length, format, allowed character set
+- Load secrets from environment variables or a secrets manager — never hardcode them
+- Add authentication and authorization checks to every new route and handler
+- Use structured logging with correlation IDs — never log passwords, tokens, PII, or health data
+- Enforce TLS on all endpoints that transmit sensitive data
+- Pin dependencies to exact versions in security-sensitive contexts
+- Add USER and HEALTHCHECK to every Dockerfile
 
 Never:
-- Use string concatenation to build SQL queries
-- Store passwords in plaintext or with weak hashing
-- Return internal error details to API clients
-- Disable TLS/SSL certificate verification
-- Use eval() with user-controlled input
+- Concatenate user input into SQL, shell commands, LDAP filters, or template strings
+- Hash passwords with MD5, SHA1, or unsalted SHA256 — use bcrypt (rounds >= 12), argon2id, or scrypt
+- Return stack traces, internal paths, or technology identifiers in API error responses
+- Disable TLS certificate validation — no verify=False, no rejectUnauthorized: false, no InsecureSkipVerify: true
+- Use eval() or Function() with any user-supplied data
+- Store CVV, CVC, or full PAN post-authorization — prohibited by PCI-DSS 3.2.1
+- Log patient identifiers, diagnosis codes, or medication data — HIPAA violation
 
-## Security audit command
+---
 
-When the user types `/security-audit` or asks "audit this project" or "find security issues":
-1. Scan all open files and the workspace for the issues listed above
-2. Produce a report grouped by severity (CRITICAL first)
-3. Map each finding to the relevant framework control
-4. Provide a concrete fix for each finding
-5. End with a compliance dashboard (OWASP / SOC 2 / GDPR / CIS scores out of 10)
+## 2. OWASP TOP 10
+
+### A01 — Broken Access Control
+Flag: database lookup by user-controlled ID without ownership verification (IDOR)
+  Bad:  db.find({ id: req.params.id })
+  Good: db.find({ id: req.params.id, ownerId: req.user.id })
+Flag: routes that mutate data or return sensitive resources without authorization middleware
+Flag: path traversal — fs.readFile(path.join('/uploads', req.params.file)) without basename sanitization
+Flag: admin or privileged endpoints accessible without role check
+Flag: CORS allowing credentialed cross-origin reads from untrusted origins
+
+### A02 — Cryptographic Failures
+Flag: hardcoded passwords, API keys, tokens, or connection strings in source code
+Flag: weak password hashing — md5(), sha1(), sha256() without salt — replace with bcrypt/argon2/scrypt
+Flag: sensitive data in log statements — passwords, tokens, PII, card numbers
+Flag: JWT missing exp claim, accepting alg: none, or secret stored inline in code
+Flag: TLS disabled or certificate validation bypassed
+Flag: symmetric keys or private keys committed to repository
+Flag: HTTP used for endpoints transmitting credentials or personal data
+
+### A03 — Injection
+Flag: SQL string concatenation — "SELECT * FROM users WHERE id = " + userId
+Flag: shell injection — exec(userInput), os.system(data), child_process.exec(req.body.cmd)
+Flag: eval() with user-controlled data — eval(req.body.code), Function(userInput)()
+Flag: server-side template injection — user input inserted into Jinja2, Pug, Twig, Handlebars without escaping
+Flag: NoSQL injection — db.find({ $where: userInput }), unsanitized MongoDB operators
+Flag: XXE — XML parsers with external entity processing enabled on user-supplied XML
+
+### A04 — Insecure Design
+Flag: login, registration, or password-reset endpoints without rate limiting middleware
+Flag: API endpoints accepting unbounded input without size or type validation
+Flag: missing CAPTCHA or anti-automation protection on public-facing forms
+
+### A05 — Security Misconfiguration
+Flag: cors({ origin: '*' }) on authenticated or credentialed routes
+Flag: error responses returning stack traces — res.json({ error: err.stack })
+Flag: debug=True or NODE_ENV=development set outside local-only config
+Flag: missing security headers — no helmet, no CSP, no HSTS, no X-Frame-Options
+Flag: default credentials not changed (admin/admin, root/root)
+Flag: directory listing enabled on web server
+
+### A06 — Vulnerable Components
+Flag: dependencies with known CVEs in package.json, requirements.txt, go.mod, pom.xml
+Flag: overly broad version ranges for security-sensitive packages — "^1.x", ">=1.0"
+Flag: no Dependabot, Renovate, or equivalent automated update configuration
+Flag: EOL runtime versions — Node.js 14, Python 3.7, Java 8 without LTS
+
+### A07 — Authentication Failures
+Flag: passwords hashed with MD5, SHA1, or unsalted SHA256
+Flag: JWT access tokens without exp claim or with expiry > 15 minutes
+Flag: missing server-side session invalidation on logout
+Flag: login endpoint with no rate limiting, no account lockout, no CAPTCHA
+Flag: remember-me or persistent tokens stored in plaintext in database
+
+### A08 — Software and Data Integrity Failures
+Flag: CI/CD pipeline with no SAST or SCA step
+Flag: GitHub Actions with pull_request_target checking out fork code (code injection risk)
+Flag: Actions pinned to mutable tags — uses: actions/checkout@v4 — must use SHA
+Flag: permissions: write-all at workflow or job level without justification
+Flag: unsigned container images pushed to registry
+
+### A09 — Logging and Monitoring Failures
+Flag: sensitive endpoints with no access logging
+Flag: failed authentication events not explicitly logged
+Flag: log statements including passwords, tokens, card numbers, or PII
+Flag: no correlation ID or request ID in log entries across multi-service codebase
+
+### A10 — SSRF
+Flag: server-side fetch from user-controlled URL without allowlist validation
+  Bad:  fetch(req.body.url)
+  Good: if (!ALLOWED_HOSTS.includes(new URL(req.body.url).hostname)) throw new Error('Forbidden')
+Flag: redirect following enabled on server-side HTTP clients with untrusted input
+Flag: cloud metadata endpoints reachable without IMDS protection — 169.254.169.254, metadata.google.internal
+
+---
+
+## 3. SOC 2
+
+### CC6 — Access Controls
+Flag: missing MFA enforcement for admin accounts or privileged API operations
+Flag: shared credentials or generic service accounts used across services
+Flag: sensitive data not encrypted at rest — check Terraform resource configs, ORM model definitions
+Flag: all users have equal access — no role-based access control implemented
+
+### CC7 — Monitoring and Operations
+Flag: no health check endpoint defined — /health, /readiness, /liveness
+Flag: no structured logging or no correlation ID in log entries
+Flag: no alerting configuration for authentication failures or error rate anomalies
+
+### CC8 — Change Management
+Flag: pipeline missing test execution before merge
+Flag: no branch protection or CODEOWNERS configuration visible
+Flag: infrastructure changes applied without pipeline enforcement
+
+### A1 — Availability
+Flag: no readiness or liveness probes in Kubernetes deployment specs
+Flag: no graceful shutdown handler in application code
+Flag: single point of failure with no replica or failover configuration
+
+---
+
+## 4. GDPR
+
+Flag: personal data in log statements — email, IP, full name, phone, national ID, date of birth
+  Bad:  logger.info('User login', { email, ip: req.ip })
+  Good: logger.info('User login', { userId: user.id })
+
+Flag: analytics or tracking loaded without consent gate — Google Analytics (gtag.js, analytics.js), Mixpanel, Segment, Hotjar, Facebook Pixel loaded unconditionally at page load
+  Violation: GDPR Art. 6 and Art. 7 — requires freely given, specific, informed consent
+
+Flag: no privacy policy link in registration, onboarding, or checkout flows
+
+Flag: user data transmitted to third-party APIs without disclosed lawful basis
+
+Flag: no data deletion mechanism — no endpoint, no admin function, no scheduled purge for user data (Art. 17 right to erasure)
+
+Flag: no DSAR handler — users cannot export their own data (Art. 20 data portability)
+
+Flag: cookies set without SameSite=Strict or Lax, Secure, and HttpOnly attributes
+
+Flag: PII stored in URL query parameters — /search?email=user@example.com (logged by servers and proxies)
+
+Flag: consent not stored with version and timestamp — no evidence of consent version management
+
+---
+
+## 5. ISO 27001
+
+### A.8.9 — Configuration Management
+Flag: hardcoded secrets, credentials, or API keys in source code or committed config files
+Flag: .env files not listed in .gitignore
+Flag: infrastructure configuration not managed as code
+
+### A.8.24 — Cryptography
+Flag: deprecated algorithms — DES, 3DES, RC4, MD5, SHA1 used for hashing, signing, or encryption
+Flag: RSA keys shorter than 2048 bits or EC keys shorter than 256 bits
+Flag: cryptographic keys hardcoded instead of managed via KMS or secrets manager
+
+### A.8.25 — Secure Development Lifecycle
+Flag: CI/CD pipeline without security gates — no SAST, no DAST, no SCA
+Flag: no security-focused code review for sensitive changes (auth, crypto, payment processing)
+
+### A.8.28 — Secure Coding
+Flag: unparameterized database queries and missing input validation
+Flag: missing output encoding before rendering user-controlled data in HTML
+
+### A.8.12 — Information Leakage Prevention
+Flag: no secrets scanning configured in CI/CD — gitleaks, trufflehog
+Flag: verbose API errors exposing internal paths, technology versions, or stack traces
+
+### A.5.36 — Compliance
+Flag: SECURITY.md absent from repository root
+Flag: no vulnerability disclosure contact or process documented
+
+---
+
+## 6. PCI-DSS
+
+Apply when code references card processing, payment APIs, or financial transaction handling.
+
+Flag: PAN pattern in source code or logs
+  Pattern: Visa \b4[0-9]{12}(?:[0-9]{3})?\b, Mastercard \b5[1-5][0-9]{14}\b
+
+Flag: CVV/CVC/CVV2 stored in any persistent storage — strictly prohibited by PCI-DSS Req. 3.2.1
+
+Flag: payment card data transmitted without TLS
+
+Flag: direct card number handling without an approved tokenization provider or payment gateway
+
+Flag: cardholder data access not logged with user identity, timestamp, and action — Req. 10
+
+Flag: no MFA on administrative access to systems that store, process, or transmit cardholder data
+
+Flag: no WAF or intrusion detection for payment-processing infrastructure
+
+Flag: overly permissive access to payment database tables — no role-based restriction
+
+---
+
+## 7. NIST SP 800-53
+
+### IA-5 — Authenticator Management
+Flag: passwords stored without strong adaptive hashing — bcrypt, argon2id, or scrypt required
+Flag: default credentials not changed in application or infrastructure configuration
+Flag: API keys without rotation mechanism or expiry
+
+### AU-2 / AU-12 — Audit Logging
+Flag: authentication events (success and failure) not logged
+Flag: privileged or administrative actions not logged
+Flag: log entries missing timestamp, user identity, event type, or outcome
+
+### SC-8 — Transmission Security
+Flag: data transmitted over unencrypted channels
+Flag: TLS certificate validation disabled — verify=False, rejectUnauthorized: false, InsecureSkipVerify: true
+Flag: sensitive data in GET URL parameters — logged by intermediaries
+
+### SC-28 — Data at Rest Protection
+Flag: database fields containing PII or secrets not encrypted
+Flag: encryption at rest not enabled on storage volumes or database instances
+Flag: encryption keys stored alongside the data they protect
+
+### SA-11 — Developer Security Testing
+Flag: no SAST tool configured in development pipeline
+Flag: no DAST referenced for pre-production testing
+Flag: security findings not tracked in issue tracker
+
+### CM-6 — Configuration Settings
+Flag: insecure default configuration deployed without hardening
+Flag: infrastructure configuration not aligned with CIS Benchmarks
+
+### SI-10 — Input Validation
+Flag: user inputs accepted without type, length, format, or range validation
+Flag: file upload endpoints without MIME type validation and size limits
+Flag: GraphQL without depth limiting or complexity analysis
+
+---
+
+## 8. NIST SSDF (SP 800-218)
+
+### PO.1 — Security Requirements
+Flag: SECURITY.md absent from repository root
+Flag: no threat model or security architecture document referenced in project
+
+### PS.3 — Protect Software Releases
+Flag: container images not scanned before push — Trivy, Grype, Snyk Container
+Flag: no SBOM generated in CI/CD pipeline — cyclonedx-npm, syft, cdxgen
+Flag: build artifacts not signed or attested — Cosign, SLSA provenance
+Flag: base image not pinned to digest — FROM node:20-alpine@sha256:<digest> required
+
+### PW.4 — SAST Implementation
+Flag: no SAST tool configured — CodeQL, Semgrep, Bandit (Python), Gosec (Go), SpotBugs (Java)
+Flag: SAST not blocking merges on HIGH or CRITICAL findings
+
+### PW.5 — Dependency Scanning
+Flag: no SCA tool in pipeline — Dependabot, Snyk, OWASP Dependency-Check, pip-audit
+Flag: dependency vulnerabilities not blocking merges
+
+### RV.1 — Vulnerability Disclosure
+Flag: no SECURITY.md with responsible disclosure instructions
+Flag: no bug bounty or security contact defined
+
+---
+
+## 9. CIS BENCHMARKS
+
+### Docker
+
+CIS 4.1 — Flag: Dockerfile without USER instruction — container runs as root
+  Fix:
+    RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+    USER appuser
+
+CIS 4.5 — Flag: mutable base image tags — FROM node:latest, FROM python:3, FROM ubuntu
+  Fix: FROM node:20-alpine@sha256:<digest>
+
+CIS 4.6 — Flag: no HEALTHCHECK instruction in Dockerfile
+  Fix: HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:8080/health || exit 1
+
+CIS 4.3 — Flag: missing .dockerignore or .dockerignore not excluding .git, node_modules, .env, *.key, *.pem
+
+CIS 3.x — Flag: ADD used for local files — use COPY instead
+
+CIS 4.x — Flag: ARG or ENV used to bake secrets into image layers
+
+### Kubernetes
+
+Flag: securityContext.privileged: true on any container
+Flag: allowPrivilegeEscalation not explicitly set to false
+Flag: securityContext.runAsNonRoot absent or false
+Flag: readOnlyRootFilesystem absent or false
+Flag: missing resources.limits.cpu and resources.limits.memory — enables resource exhaustion attacks
+Flag: NetworkPolicy absent from namespace — all pods communicate freely
+Flag: secrets base64-encoded in ConfigMap instead of Secret resource
+Flag: ClusterRoleBinding to cluster-admin for application service accounts
+Flag: wildcard RBAC — verbs: ["*"] or resources: ["*"]
+Flag: automountServiceAccountToken: true on pods not requiring API server access
+
+### GitHub Actions / CI-CD
+
+Flag: pull_request_target with actions/checkout of fork branch — enables arbitrary code execution
+Flag: untrusted input in run: step — echo "${{ github.event.pull_request.title }}" (injection via PR title)
+Flag: Actions pinned to mutable tags — uses: actions/checkout@v4 — must use full SHA
+Flag: permissions: write-all at workflow or job level
+Flag: secrets hardcoded in workflow YAML — use ${{ secrets.NAME }}
+Flag: no SAST step in CI pipeline
+Flag: no SCA step in CI pipeline
+Flag: no secrets scanning step in CI pipeline — gitleaks, trufflehog
+
+### Terraform / IaC
+
+Flag: security_groups with cidr_blocks = ["0.0.0.0/0"] on port 22, 3389, 5432, 6379, 27017
+Flag: S3 bucket without block_public_acls = true and block_public_policy = true
+Flag: RDS without storage_encrypted = true and deletion_protection = true
+Flag: IAM policy with "Action": "*" or "Resource": "*"
+Flag: CloudTrail not enabled or log file validation disabled
+Flag: credentials hardcoded in .tf or .tfvars files
+Flag: remote state without encryption or state locking configured
+
+---
+
+## 10. HIPAA
+
+Apply when code references patient records, health data, medical terminology, or EHR integration.
+
+Flag: patient identifiers in logs, URL parameters, or unfiltered API responses
+  Identifiers: patient_id, mrn, ssn, dob, diagnosis, medication, icd_code, procedure_code
+
+Flag: PHI transmitted over HTTP without TLS — violates HIPAA §164.312(e)(1)
+
+Flag: PHI not encrypted at rest — check database model definitions and storage configuration
+
+Flag: PHI endpoints accessible without authentication or authorization check
+
+Flag: no audit trail for PHI access — every read, write, and delete of patient data must be logged with user identity, timestamp, and action — §164.312(b)
+
+Flag: audit logs not retained for minimum 6 years — §164.316(b)(2)
+
+Flag: PHI transmitted to third-party services without Business Associate Agreement (BAA) reference
+
+Flag: no minimum necessary access — queries returning full patient records when only specific fields are needed — §164.502(b)
+
+Flag: session auto-logoff not implemented for interfaces accessing PHI — §164.312(a)(2)(iii)
+
+Flag: PHI in email body or SMS without end-to-end encryption
+
+---
+
+## FINDING FORMAT
+
+Use this format for every security finding:
+
+SEVERITY — [Framework ID] — Title
+File: [filename], line [X]
+Problem: [clear description of the vulnerability or compliance violation]
+Impact: [specific attack scenario or regulatory consequence]
+Fix:
+  [exact corrected code or configuration]
+Standard: [control ID — CWE-XXX / OWASP AXX / CIS X.X / GDPR Art.XX / HIPAA §164.XXX]
+
+Severity levels:
+  CRITICAL — directly exploitable, data breach likely, or regulatory fine probable
+  HIGH     — exploitable with moderate effort or significant compliance gap
+  MEDIUM   — exploitable under specific conditions or policy violation
+  LOW      — defense-in-depth improvement or minor policy gap
+  INFO     — best practice recommendation, no direct security impact
+
+Example finding:
+
+CRITICAL — OWASP A03 — SQL Injection
+File: src/users/repository.ts, line 42
+Problem: User input concatenated directly into SQL query — db.query("SELECT * FROM users WHERE id = " + req.params.id)
+Impact: Attacker can dump entire database, bypass authentication, or destroy data using SQL metacharacters
+Fix:
+  db.query("SELECT * FROM users WHERE id = $1", [req.params.id])
+Standard: CWE-89, OWASP A03:2021
+
+---
+
+## SECURITY AUDIT COMMAND
+
+When the user types /security-audit or asks "audit this project", "find security issues", or "security review":
+
+1. Scan all workspace files against all controls defined in sections 2 through 10 above
+2. Triage and deduplicate findings — assign severity per definition above
+3. Produce a structured report:
+   - Executive summary: total findings by severity (CRITICAL / HIGH / MEDIUM / LOW / INFO)
+   - Findings grouped by severity (CRITICAL first), subdivided by framework
+   - Each finding in the standard format above
+4. Compliance dashboard — score each framework from 0 to 10 based on controls passing:
+   OWASP Top 10     X/10   [PASS / REVIEW / FAIL]
+   SOC 2            X/10   [PASS / REVIEW / FAIL]
+   GDPR             X/10   [PASS / REVIEW / FAIL]
+   ISO 27001        X/10   [PASS / REVIEW / FAIL]
+   PCI-DSS          X/10   [N/A if no payment data detected]
+   NIST SP 800-53   X/10   [PASS / REVIEW / FAIL]
+   NIST SSDF        X/10   [PASS / REVIEW / FAIL]
+   CIS Benchmarks   X/10   [PASS / REVIEW / FAIL]
+   HIPAA            X/10   [N/A if no health data detected]
+5. Quick wins: list all CRITICAL and HIGH findings estimated to fix in under 30 minutes
+6. Remediation roadmap: group remaining findings by effort — 1 day / 1 week / 1 sprint
+
+---
+
+## CODE GENERATION RULES
+
+When writing or suggesting new code, always:
+- Use parameterized queries: db.query("SELECT * FROM t WHERE id = $1", [id])
+- Validate inputs at entry: check type, length, format, and allowed character set
+- Use environment variables for secrets: process.env.SECRET_KEY, os.environ["SECRET_KEY"]
+- Add auth middleware to new routes: router.use(requireAuth), @login_required, middleware.Authenticate
+- Log with correlation IDs and without sensitive fields
+- Add HEALTHCHECK to Dockerfiles
+- Add USER instruction to Dockerfiles with a non-root system user
+- Pin actions to SHA in GitHub Actions workflows
+
+When writing or suggesting new code, never:
+- Concatenate user input into SQL, shell, LDAP, XML, or template strings
+- Store or compare passwords without adaptive hashing (bcrypt, argon2id, scrypt)
+- Return error.stack or internal details in HTTP responses to clients
+- Disable TLS or certificate validation for any reason
+- Store CVV, CVC, or full PAN in any persistent storage
+- Log patient identifiers, diagnosis codes, medication names, or PHI of any kind
+- Accept user-supplied URLs for server-side fetching without an explicit allowlist
